@@ -1,0 +1,145 @@
+{
+  "name": "insforge",
+  "displayName": "InsForge",
+  "description": "Install and manage InsForge MCP servers with one click. Connect your projects and configure AI coding assistants.",
+  "version": "0.0.1",
+  "publisher": "insforge",
+  "icon": "resources/icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/InsForge/insforge-vscode-extension"
+  },
+  "homepage": "https://insforge.dev",
+  "bugs": {
+    "url": "https://github.com/InsForge/insforge-vscode-extension/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "insforge",
+    "mcp",
+    "model context protocol",
+    "ai",
+    "claude",
+    "cursor",
+    "copilot"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "insforge.login",
+        "title": "InsForge: Login"
+      },
+      {
+        "command": "insforge.logout",
+        "title": "InsForge: Logout"
+      },
+      {
+        "command": "insforge.selectProject",
+        "title": "InsForge: Select Project"
+      },
+      {
+        "command": "insforge.installMcp",
+        "title": "InsForge: Install MCP",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "insforge.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "insforge",
+          "title": "InsForge",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "insforge": [
+        {
+          "id": "insforge.projectView",
+          "name": "Projects"
+        },
+        {
+          "id": "insforge.mcpView",
+          "name": "Installed MCPs"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "insforge.refresh",
+          "when": "view == insforge.projectView",
+          "group": "navigation"
+        },
+        {
+          "command": "insforge.installMcp",
+          "when": "view == insforge.mcpView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "insforge.installMcp",
+          "when": "view == insforge.projectView && viewItem == project",
+          "group": "inline"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "insforge.projectView",
+        "contents": "Connect your InsForge account to manage MCP servers.\n[Login with InsForge](command:insforge.login)"
+      }
+    ],
+    "configuration": {
+      "title": "InsForge",
+      "properties": {
+        "insforge.oauthClientId": {
+          "type": "string",
+          "default": "",
+          "description": "OAuth Client ID for InsForge authentication"
+        },
+        "insforge.oauthClientSecret": {
+          "type": "string",
+          "default": "",
+          "description": "OAuth Client Secret (optional, for confidential clients)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
