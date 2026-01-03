@@ -1,14 +1,13 @@
 import * as vscode from 'vscode';
 import { AuthProvider } from '../auth/authProvider';
 import { ProjectTreeProvider, ProjectItem } from '../views/projectTreeProvider';
-import { McpTreeProvider } from '../views/mcpTreeProvider';
 import { installMcp } from './installMcp';
 
 export function registerCommands(
   context: vscode.ExtensionContext,
   authProvider: AuthProvider,
   projectTreeProvider: ProjectTreeProvider,
-  mcpTreeProvider: McpTreeProvider
+  updateStatusBar: () => void
 ): void {
   // Login command
   context.subscriptions.push(
@@ -22,7 +21,7 @@ export function registerCommands(
     vscode.commands.registerCommand('insforge.logout', async () => {
       await authProvider.logout();
       projectTreeProvider.refresh();
-      mcpTreeProvider.refresh();
+      updateStatusBar();
     })
   );
 
@@ -30,7 +29,6 @@ export function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('insforge.refresh', () => {
       projectTreeProvider.refresh();
-      mcpTreeProvider.refresh();
     })
   );
 
@@ -95,7 +93,7 @@ export function registerCommands(
       authProvider.setCurrentOrg(orgPick.org);
       authProvider.setCurrentProject(projectPick.project);
 
-      mcpTreeProvider.refresh();
+      updateStatusBar();
       vscode.window.showInformationMessage(
         `Selected project: ${projectPick.project.name}`
       );
@@ -108,7 +106,7 @@ export function registerCommands(
       authProvider.setCurrentOrg(item.organization);
       authProvider.setCurrentProject(item.project);
 
-      mcpTreeProvider.refresh();
+      updateStatusBar();
       vscode.window.showInformationMessage(
         `Selected project: ${item.project.name}`
       );
@@ -126,6 +124,7 @@ export function registerCommands(
         // Also set it as current project
         authProvider.setCurrentOrg(item.organization);
         authProvider.setCurrentProject(item.project);
+        updateStatusBar();
       }
 
       if (!project) {
@@ -147,7 +146,6 @@ export function registerCommands(
       }
 
       await installMcp(project, authProvider);
-      mcpTreeProvider.refresh();
     })
   );
 }

@@ -73,10 +73,6 @@
         {
           "id": "insforge.projectView",
           "name": "Projects"
-        },
-        {
-          "id": "insforge.mcpView",
-          "name": "Installed MCPs"
         }
       ]
     },
@@ -85,11 +81,6 @@
         {
           "command": "insforge.refresh",
           "when": "view == insforge.projectView",
-          "group": "navigation"
-        },
-        {
-          "command": "insforge.installMcp",
-          "when": "view == insforge.mcpView",
           "group": "navigation"
         }
       ],
