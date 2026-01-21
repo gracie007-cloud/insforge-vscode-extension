@@ -1,7 +1,18 @@
 import * as vscode from 'vscode';
 import { AuthProvider, Organization, Project } from '../auth/authProvider';
+import { McpStatus } from '../commands/installMcp';
+import { startMcpSocketListener, stopMcpSocketListener, stopAllMcpSocketListeners } from '../utils/mcpSocketListener';
 
-const INSTALLED_MCP_KEY = 'insforge.installedMcpProject';
+const MCP_STATUS_KEY = 'insforge.mcpStatus';
+const MCP_REAL_CONNECTED_KEY = 'insforge.mcpRealConnected';
+
+interface McpProjectStatus {
+  projectId: string;
+  status: McpStatus;
+  tools?: string[];
+  error?: string;
+  lastUpdated: number;
+}
 
 export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'insforge.projectsView';
@@ -25,27 +36,157 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Get the project ID that currently has MCP installed (only one at a time)
+   * Get MCP status for all projects
    */
-  public getInstalledMcpProject(): string | null {
-    if (!this._context) return null;
-    return this._context.globalState.get<string | null>(INSTALLED_MCP_KEY, null);
+  private getMcpStatuses(): Map<string, McpProjectStatus> {
+    if (!this._context) return new Map();
+    const statuses = this._context.globalState.get<Record<string, McpProjectStatus>>(MCP_STATUS_KEY, {});
+    return new Map(Object.entries(statuses));
   }
 
   /**
-   * Mark a project as having MCP installed (replaces any previous)
+   * Get MCP status for a specific project
    */
-  public async markMcpInstalled(projectId: string): Promise<void> {
+  public getMcpStatus(projectId: string): McpStatus {
+    const statuses = this.getMcpStatuses();
+    return statuses.get(projectId)?.status || 'none';
+  }
+
+  /**
+   * Get MCP tools for a verified project
+   */
+  public getMcpTools(projectId: string): string[] | undefined {
+    const statuses = this.getMcpStatuses();
+    return statuses.get(projectId)?.tools;
+  }
+
+  /**
+   * Update MCP status for a project
+   */
+  private async updateMcpStatus(projectId: string, status: McpStatus, tools?: string[], error?: string): Promise<void> {
     if (!this._context) return;
-    await this._context.globalState.update(INSTALLED_MCP_KEY, projectId);
+    
+    const statuses = this._context.globalState.get<Record<string, McpProjectStatus>>(MCP_STATUS_KEY, {});
+    
+    statuses[projectId] = {
+      projectId,
+      status,
+      tools,
+      error,
+      lastUpdated: Date.now()
+    };
+    
+    await this._context.globalState.update(MCP_STATUS_KEY, statuses);
     this.refresh();
   }
 
   /**
-   * Check if a project has MCP installed
+   * Mark a project as verifying MCP (yellow dot)
+   */
+  public async markMcpVerifying(projectId: string): Promise<void> {
+    await this.updateMcpStatus(projectId, 'verifying');
+  }
+
+  /**
+   * Mark a project as having verified MCP (green dot)
+   */
+  public async markMcpVerified(projectId: string, tools: string[]): Promise<void> {
+    await this.updateMcpStatus(projectId, 'verified', tools);
+  }
+
+  /**
+   * Mark a project as having failed MCP verification (red dot)
+   */
+  public async markMcpFailed(projectId: string, error: string): Promise<void> {
+    await this.updateMcpStatus(projectId, 'failed', undefined, error);
+  }
+
+  /**
+   * Check if a project has MCP verified (for backward compatibility)
    */
   public isMcpInstalled(projectId: string): boolean {
-    return this.getInstalledMcpProject() === projectId;
+    return this.getMcpStatus(projectId) === 'verified';
+  }
+
+  /**
+   * Get the project ID that currently has MCP installed (for backward compatibility)
+   */
+  public getInstalledMcpProject(): string | null {
+    const statuses = this.getMcpStatuses();
+    for (const [projectId, status] of statuses) {
+      if (status.status === 'verified') {
+        return projectId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if MCP is real connected (confirmed by socket event)
+   */
+  public isMcpRealConnected(): boolean {
+    if (!this._context) return false;
+    return this._context.globalState.get<boolean>(MCP_REAL_CONNECTED_KEY, false);
+  }
+
+  /**
+   * Mark MCP as real connected (received socket confirmation)
+   */
+  public async markMcpRealConnected(): Promise<void> {
+    if (!this._context) return;
+    await this._context.globalState.update(MCP_REAL_CONNECTED_KEY, true);
+    
+    // Send message to webview to show completion and auto-hide
+    if (this._view) {
+      this._view.webview.postMessage({ command: 'showCompletion' });
+    }
+    
+    this.refresh();
+  }
+
+  /**
+   * Start listening for MCP connected events via socket
+   */
+  public async startSocketListener(project: Project, apiKey: string): Promise<void> {
+    const apiBaseUrl = `https://${project.appkey}.${project.region}.insforge.app`;
+    
+    startMcpSocketListener(
+      project.id,
+      apiKey,
+      apiBaseUrl,
+      {
+        onConnected: () => {
+          console.log(`[ProjectsViewProvider] Socket connected for project ${project.id}`);
+        },
+        onMcpEvent: async (event) => {
+          console.log(`[ProjectsViewProvider] MCP event received:`, event);
+          vscode.window.showInformationMessage(
+            `MCP Connected! Tool "${event.tool_name}" was called by your coding agent.`
+          );
+          await this.markMcpRealConnected();
+        },
+        onDisconnected: () => {
+          console.log(`[ProjectsViewProvider] Socket disconnected for project ${project.id}`);
+        },
+        onError: (error) => {
+          console.error(`[ProjectsViewProvider] Socket error:`, error);
+        }
+      }
+    );
+  }
+
+  /**
+   * Stop socket listener for a project
+   */
+  public stopSocketListener(projectId: string): void {
+    stopMcpSocketListener(projectId);
+  }
+
+  /**
+   * Stop all socket listeners (called on deactivate)
+   */
+  public stopAllSocketListeners(): void {
+    stopAllMcpSocketListeners();
   }
 
   public refresh(): void {
@@ -92,6 +233,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
           const projectUrl = `https://insforge.dev/dashboard/project/${message.projectId}`;
           vscode.env.openExternal(vscode.Uri.parse(projectUrl));
           break;
+        case 'retryMcpVerification':
+          await this._handleRetryMcpVerification(message.orgId, message.projectId);
+          break;
         case 'refresh':
           this.refresh();
           break;
@@ -129,6 +273,34 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
     // Execute install MCP command
     vscode.commands.executeCommand('insforge.installMcp');
+  }
+
+  private async _handleRetryMcpVerification(orgId: string, projectId: string): Promise<void> {
+    const projects = await this._authProvider.getProjects(orgId);
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    // Get API credentials
+    const apiKey = await this._authProvider.getProjectApiKey(projectId);
+    if (!apiKey) {
+      vscode.window.showErrorMessage('Could not retrieve API key for verification');
+      return;
+    }
+
+    const apiBaseUrl = `https://${project.appkey}.${project.region}.insforge.app`;
+
+    // Import and call retry verification
+    const { retryVerification } = await import('../commands/installMcp');
+    await retryVerification(
+      projectId,
+      apiKey,
+      apiBaseUrl,
+      {
+        onVerifying: (pid) => this.markMcpVerifying(pid),
+        onVerified: (pid, tools) => this.markMcpVerified(pid, tools),
+        onFailed: (pid, error) => this.markMcpFailed(pid, error),
+      }
+    );
   }
 
   private async _updateContent(): Promise<void> {
@@ -234,21 +406,32 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       }
 
       // Org with projects
-      const installedProjectId = this.getInstalledMcpProject();
-
       const projectsHtml = projects.map(project => {
         const statusText = project.status || 'Unknown';
         const locationText = project.region || 'Unknown';
         const databaseSize = project.storage_disk_size ? `${project.storage_disk_size} GB` : 'Unknown';
-        const isMcpInstalled = installedProjectId === project.id;
+        const mcpStatus = this.getMcpStatus(project.id);
+        const mcpTools = this.getMcpTools(project.id);
+        const toolCount = mcpTools?.length || 0;
 
-        // Show green dot if MCP is installed, otherwise show Install button
-        const mcpStatusHtml = isMcpInstalled
-          ? `<span class="mcp-connected-dot" title="MCP Connected"></span>`
-          : `<button class="install-btn" onclick="event.stopPropagation(); installMcp('${org.id}', '${project.id}')" title="Install MCP">
+        // Show different UI based on MCP status
+        let mcpStatusHtml: string;
+        switch (mcpStatus) {
+          case 'verifying':
+            mcpStatusHtml = `<span class="mcp-verifying-dot" title="Verifying MCP server..."></span>`;
+            break;
+          case 'verified':
+            mcpStatusHtml = `<span class="mcp-verified-dot" title="MCP Server Verified (${toolCount} tools)"></span>`;
+            break;
+          case 'failed':
+            mcpStatusHtml = `<span class="mcp-failed-dot" title="MCP verification failed - Click to retry" onclick="event.stopPropagation(); retryMcpVerification('${org.id}', '${project.id}')"></span>`;
+            break;
+          default:
+            mcpStatusHtml = `<button class="install-btn" onclick="event.stopPropagation(); installMcp('${org.id}', '${project.id}')" title="Install MCP">
               <img class="mcp-icon" src="${mcpIconUri}" alt="MCP" />
               <span class="install-text">Install MCP</span>
             </button>`;
+        }
 
         return `
         <div class="project-section">
@@ -301,6 +484,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }).join('');
 
     const hasMcpInstalled = this.getInstalledMcpProject() !== null;
+    const hasMcpRealConnected = this.isMcpRealConnected();
+    
+    // Determine which step to show:
+    // - step1: No MCP installed yet
+    // - step2: MCP installed but not real connected (waiting for socket confirmation)
+    // - stepComplete: Real connected (socket confirmed)
+    const showStep1 = !hasMcpInstalled;
+    const showStep2 = hasMcpInstalled && !hasMcpRealConnected;
+    const showComplete = hasMcpRealConnected;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -319,7 +511,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   <div class="guide-wrapper" id="guideWrapper">
     <div class="guide-card" id="guideCard">
       <!-- Step 1: Install MCP -->
-      <div class="guide-step ${hasMcpInstalled ? 'hidden' : ''}" id="step1">
+      <div class="guide-step ${showStep1 ? '' : 'hidden'}" id="step1">
         <div class="guide-content">
           <div class="guide-icon">
             <img src="${connectIconUri}" alt="Connect" />
@@ -346,7 +538,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       </div>
       
       <!-- Step 2: Verify Connection -->
-      <div class="guide-step hidden" id="step2">
+      <div class="guide-step ${showStep2 ? '' : 'hidden'}" id="step2">
         <div class="guide-content">
           <div class="guide-icon">
             <img src="${sendIconUri}" alt="Send" />
@@ -380,7 +572,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       </div>
       
       <!-- Completion: Connection Verified -->
-      <div class="guide-step ${hasMcpInstalled ? '' : 'hidden'}" id="stepComplete">
+      <div class="guide-step ${showComplete ? '' : 'hidden'}" id="stepComplete">
         <div class="guide-content">
           <div class="guide-icon">
             <img src="${checkedIconUri}" alt="Checked" />
@@ -425,6 +617,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     
     function installMcp(orgId, projectId) {
       vscode.postMessage({ command: 'installMcp', orgId, projectId });
+    }
+    
+    function retryMcpVerification(orgId, projectId) {
+      vscode.postMessage({ command: 'retryMcpVerification', orgId, projectId });
     }
     
     function openInInsforge(orgId) {
@@ -491,6 +687,33 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         }, 3000);
       });
     }
+    
+    // Listen for messages from extension
+    window.addEventListener('message', event => {
+      const message = event.data;
+      switch (message.command) {
+        case 'showCompletion':
+          // Show completion step
+          document.getElementById('step1').classList.add('hidden');
+          document.getElementById('step2').classList.add('hidden');
+          document.getElementById('stepComplete').classList.remove('hidden');
+          document.getElementById('guideCard').classList.remove('hidden');
+          
+          // Auto-hide after 5 seconds
+          setTimeout(() => {
+            const guideCard = document.getElementById('guideCard');
+            if (guideCard) {
+              guideCard.style.transition = 'opacity 0.5s ease-out';
+              guideCard.style.opacity = '0';
+              setTimeout(() => {
+                guideCard.classList.add('hidden');
+                guideCard.style.opacity = '1';
+              }, 500);
+            }
+          }, 5000);
+          break;
+      }
+    });
   </script>
 </body>
 </html>`;
@@ -623,7 +846,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .project-section {
-      margin-left: 16px;
+      margin-left: 20px;
     }
     
     .project-header {
@@ -720,12 +943,46 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       white-space: nowrap;
     }
     
-    .mcp-connected-dot {
+    /* MCP Status Dots */
+    .mcp-verified-dot {
       width: 8px;
       height: 8px;
-      background-color: #10B981;
+      background-color: #22C55E;
       border-radius: 50%;
       flex-shrink: 0;
+    }
+    
+    .mcp-verifying-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #EAB308;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    
+    .mcp-failed-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #EF4444;
+      border-radius: 50%;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    
+    .mcp-failed-dot:hover {
+      background-color: #DC2626;
+    }
+    
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+      }
     }
     
     /* Empty state styles */
