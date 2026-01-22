@@ -19,13 +19,17 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
   private _view?: vscode.WebviewView;
   private _context?: vscode.ExtensionContext;
+  private _disposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _authProvider: AuthProvider
   ) {
     // Refresh when auth state changes
-    _authProvider.onDidChangeAuth(() => this.refresh());
+    this._disposables.push(_authProvider.onDidChangeAuth(() => this.refresh()));
+    
+    // Refresh when theme changes (to update logo)
+    this._disposables.push(vscode.window.onDidChangeActiveColorTheme(() => this.refresh()));
   }
 
   /**
@@ -33,6 +37,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
    */
   public setContext(context: vscode.ExtensionContext): void {
     this._context = context;
+    context.subscriptions.push(...this._disposables);
   }
 
   /**
@@ -207,6 +212,17 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     stopAllMcpSocketListeners();
   }
 
+  /**
+   * Clear all extension state (for testing)
+   */
+  public async clearAllState(): Promise<void> {
+    if (!this._context) return;
+    this.stopAllSocketListeners();
+    await this._context.globalState.update(MCP_STATUS_KEY, undefined);
+    await this._context.globalState.update(MCP_REAL_CONNECTED_KEY, undefined);
+    this.refresh();
+  }
+
   public refresh(): void {
     if (this._view) {
       this._updateContent();
@@ -343,8 +359,12 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _getWelcomeHtml(webview: vscode.Webview): string {
+    // Choose logo based on current theme
+    const isDarkTheme = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+      || vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.HighContrast;
+    const logoFile = isDarkTheme ? 'logo-dark.svg' : 'logo-light.svg';
     const logoUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'resources', 'logo-dark.svg')
+      vscode.Uri.joinPath(this._extensionUri, 'resources', logoFile)
     );
 
     return `<!DOCTYPE html>
@@ -1073,7 +1093,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .guide-card {
-      background: var(--vscode-editorWidget-background, ##262626);
+      background: var(--vscode-editorWidget-background, #262626);
+      border: 1px solid var(--vscode-editorWidget-border, #454545);
       border-radius: 8px;
       overflow: hidden;
     }
@@ -1121,14 +1142,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       font-size: 18px;
       font-weight: 600;
       line-height: 28px;
-      color: white;
+      color: var(--vscode-foreground);
       margin-bottom: 8px;
     }
     
     .guide-desc {
       font-size: 14px;
       line-height: 21px;
-      color: #F5F5F5;
+      color: var(--vscode-descriptionForeground);
     }
     
     .guide-close {
@@ -1142,7 +1163,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       border: none;
       padding: 0;
       cursor: pointer;
-      color: #737373;
+      color: var(--vscode-foreground);
+      opacity: 0.6;
     }
     
     .guide-close .codicon {
@@ -1153,7 +1175,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     .guide-prompt-box {
       margin-top: 8px;
       padding: 12px;
-      background: #404040;
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
       border-radius: 8px;
       position: relative;
       display: flex;
@@ -1164,7 +1187,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     .prompt-label {
       font-size: 12px;
       line-height: 20px;
-      color: #FAFAFA;
+      color: var(--vscode-foreground);
+      opacity: 0.8;
     }
     
     .prompt-copy {
@@ -1175,7 +1199,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       border: none;
       padding: 4px;
       cursor: pointer;
-      background-color: #262626;
+      background-color: var(--vscode-button-secondaryBackground);
       border-radius: 6px;
       display: flex;
       align-items: center;
@@ -1191,7 +1215,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     .prompt-text {
       font-size: 14px;
       line-height: 24px;
-      color: #D4D4D4;
+      color: var(--vscode-foreground);
+      opacity: 0.9;
     }
     
     /* Guide footer with navigation */
@@ -1206,7 +1231,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     .guide-step-indicator {
       font-size: 14px;
       line-height: 21px;
-      color: #F5F5F5;
+      color: var(--vscode-foreground);
+      opacity: 0.8;
     }
     
     .guide-nav {
