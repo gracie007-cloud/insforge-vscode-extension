@@ -222,11 +222,15 @@ export function registerCommands(
         },
         onVerified: async (projectId, tools) => {
           projectsViewProvider.markMcpVerified(projectId, tools);
-          
+
           // Start socket listener to wait for real MCP connection
-          const apiKey = await authProvider.getProjectApiKey(projectId);
-          if (apiKey && project) {
-            projectsViewProvider.startSocketListener(project, apiKey);
+          try {
+            const apiKey = await authProvider.getProjectApiKey(projectId);
+            if (apiKey && project) {
+              projectsViewProvider.startSocketListener(project, apiKey);
+            }
+          } catch (err) {
+            console.error('[installMcp] Failed to start MCP socket listener:', err);
           }
         },
         onFailed: (projectId, error) => {

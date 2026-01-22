@@ -80,7 +80,7 @@ export class McpSocketListener {
           this.callbacks.onMcpEvent?.(data);
           
           // Disconnect after receiving the first event (we only need one confirmation)
-          this.disconnect();
+          stopMcpSocketListener(this.projectId);
         }
       });
 

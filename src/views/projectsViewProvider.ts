@@ -65,9 +65,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
    */
   private async updateMcpStatus(projectId: string, status: McpStatus, tools?: string[], error?: string): Promise<void> {
     if (!this._context) return;
-    
+
     const statuses = this._context.globalState.get<Record<string, McpProjectStatus>>(MCP_STATUS_KEY, {});
-    
+
     statuses[projectId] = {
       projectId,
       status,
@@ -75,9 +75,26 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       error,
       lastUpdated: Date.now()
     };
-    
+
     await this._context.globalState.update(MCP_STATUS_KEY, statuses);
     this.refresh();
+  }
+
+  /**
+   * Clear other verified statuses for a project
+   */
+  private async clearOtherVerifiedStatuses(currentProjectId: string): Promise<void> {
+    if (!this._context) return;
+
+    const statuses = this._context.globalState.get<Record<string, McpProjectStatus>>(MCP_STATUS_KEY, {});
+
+    for (const [id, status] of Object.entries(statuses)) {
+      if (id !== currentProjectId && status.status === 'verified') {
+        statuses[id] = { ...status, status: 'none', tools: undefined };
+      }
+    }
+
+    await this._context.globalState.update(MCP_STATUS_KEY, statuses);
   }
 
   /**
@@ -91,6 +108,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
    * Mark a project as having verified MCP (green dot)
    */
   public async markMcpVerified(projectId: string, tools: string[]): Promise<void> {
+    await this.clearOtherVerifiedStatuses(projectId);
     await this.updateMcpStatus(projectId, 'verified', tools);
   }
 
@@ -135,12 +153,12 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   public async markMcpRealConnected(): Promise<void> {
     if (!this._context) return;
     await this._context.globalState.update(MCP_REAL_CONNECTED_KEY, true);
-    
+
     // Send message to webview to show completion and auto-hide
     if (this._view) {
       this._view.webview.postMessage({ command: 'showCompletion' });
     }
-    
+
     this.refresh();
   }
 
@@ -149,7 +167,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
    */
   public async startSocketListener(project: Project, apiKey: string): Promise<void> {
     const apiBaseUrl = `https://${project.appkey}.${project.region}.insforge.app`;
-    
+
     startMcpSocketListener(
       project.id,
       apiKey,
@@ -424,7 +442,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             mcpStatusHtml = `<span class="mcp-verified-dot" title="MCP Server Verified (${toolCount} tools)"></span>`;
             break;
           case 'failed':
-            mcpStatusHtml = `<span class="mcp-failed-dot" title="MCP verification failed - Click to retry" onclick="event.stopPropagation(); retryMcpVerification('${org.id}', '${project.id}')"></span>`;
+            mcpStatusHtml = `<button
+              class="mcp-failed-btn"
+              title="MCP verification failed - Click to retry"
+              aria-label="Retry MCP verification"
+              onclick="event.stopPropagation(); retryMcpVerification('${org.id}', '${project.id}')"
+            >
+              <span class="mcp-failed-dot"></span>
+            </button>`;
             break;
           default:
             mcpStatusHtml = `<button class="install-btn" onclick="event.stopPropagation(); installMcp('${org.id}', '${project.id}')" title="Install MCP">
@@ -485,7 +510,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
     const hasMcpInstalled = this.getInstalledMcpProject() !== null;
     const hasMcpRealConnected = this.isMcpRealConnected();
-    
+
     // Determine which step to show:
     // - step1: No MCP installed yet
     // - step2: MCP installed but not real connected (waiting for socket confirmation)
@@ -961,13 +986,26 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
       animation: pulse 1.5s ease-in-out infinite;
     }
     
+    .mcp-failed-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .mcp-failed-btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: 2px;
+    }
+
     .mcp-failed-dot {
       width: 8px;
       height: 8px;
       background-color: #EF4444;
       border-radius: 50%;
       flex-shrink: 0;
-      cursor: pointer;
     }
     
     .mcp-failed-dot:hover {
