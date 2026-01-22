@@ -37,7 +37,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
    */
   public setContext(context: vscode.ExtensionContext): void {
     this._context = context;
-    this._disposables.push(...this._disposables);
+    context.subscriptions.push(...this._disposables);
   }
 
   /**
