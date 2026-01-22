@@ -2,7 +2,7 @@
   "name": "insforge",
   "displayName": "InsForge",
   "description": "Install and manage InsForge MCP servers with one click. Connect your projects and configure AI coding assistants.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "insforge",
   "icon": "resources/icon.png",
   "repository": {
@@ -123,9 +123,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "compile": "npm run esbuild-base -- --sourcemap",
+    "watch": "npm run esbuild-base -- --sourcemap --watch",
     "lint": "eslint src --ext ts",
     "package": "vsce package"
   },
@@ -135,6 +136,7 @@
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.24.0",
     "eslint": "^8.54.0",
     "typescript": "^5.3.0"
   },
