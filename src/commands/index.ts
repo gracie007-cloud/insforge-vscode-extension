@@ -241,6 +241,16 @@ export function registerCommands(
   );
 
   // Reset state command (for development/testing)
+  // This command is hidden from the command palette
+  // When need to use, add the following to the package.json:
+  // "contributes": {
+  //   "commands": [
+  //     {
+  //       "command": "insforge.resetState",
+  //       "title": "InsForge: Reset State"
+  //     }
+  //   ]
+  // }
   context.subscriptions.push(
     vscode.commands.registerCommand('insforge.resetState', async () => {
       const confirm = await vscode.window.showWarningMessage(
