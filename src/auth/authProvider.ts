@@ -8,10 +8,11 @@ const USER_DATA_KEY = 'insforge.userData';
 
 // OAuth configuration
 const INSFORGE_URL = 'https://api.insforge.dev'; // Production API
-const OAUTH_CALLBACK_PORT = 54321; // Fixed port for OAuth callback
-// Per RFC 8252, use 127.0.0.1 (not localhost) for native app loopback redirects
-const OAUTH_REDIRECT_URI = `http://127.0.0.1:${OAUTH_CALLBACK_PORT}/callback`;
 const DEFAULT_CLIENT_ID = 'clf_YHy7imyx2SKnEZZwpV-X1Q'; // Official InsForge VS Code Extension (Public)
+
+// Port range for OAuth callback server (fallback if port is busy)
+const OAUTH_PORT_START = 54321;
+const OAUTH_PORT_END = 54330;
 
 // OAuth scopes
 const SCOPES = 'user:read organizations:read projects:read projects:write';
@@ -263,6 +264,36 @@ export class AuthProvider {
     return crypto.randomBytes(16).toString('hex');
   }
 
+  /**
+   * Find an available port in the range
+   */
+  private async findAvailablePort(): Promise<number> {
+    for (let port = OAUTH_PORT_START; port <= OAUTH_PORT_END; port++) {
+      const isAvailable = await this.isPortAvailable(port);
+      if (isAvailable) {
+        return port;
+      }
+    }
+    throw new Error(`No available ports in range ${OAUTH_PORT_START}-${OAUTH_PORT_END}. Please close other applications using these ports.`);
+  }
+
+  /**
+   * Check if a port is available
+   */
+  private isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const server = http.createServer();
+      server.once('error', () => {
+        resolve(false);
+      });
+      server.once('listening', () => {
+        server.close();
+        resolve(true);
+      });
+      server.listen(port, '127.0.0.1');
+    });
+  }
+
   async login(): Promise<boolean> {
     // Check if OAuth credentials are configured
     if (!this.clientId) {
@@ -277,14 +308,19 @@ export class AuthProvider {
     }
 
     try {
+      // Find an available port
+      const port = await this.findAvailablePort();
+      console.log(`[InsForge] Using port ${port} for OAuth callback`);
+      const redirectUri = `http://127.0.0.1:${port}/callback`;
+
       // Generate PKCE pair
       const codeVerifier = this.generateCodeVerifier();
 
       // Generate state for CSRF protection
       const state = this.generateState();
 
-      // Start local callback server with fixed port
-      const authResult = await this.startCallbackServer(OAUTH_CALLBACK_PORT, state, codeVerifier, OAUTH_REDIRECT_URI);
+      // Start local callback server
+      const authResult = await this.startCallbackServer(port, state, codeVerifier, redirectUri);
 
       if (authResult) {
         vscode.window.showInformationMessage(`Logged in as ${authResult.email}`);
@@ -445,11 +481,9 @@ export class AuthProvider {
       }, 5 * 60 * 1000);
 
       server.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          reject(new Error(`Port ${port} is already in use. Please close any other application using this port and try again.`));
-        } else {
-          reject(err);
-        }
+        // This shouldn't happen since we check port availability first,
+        // but handle it just in case
+        reject(new Error(`Failed to start callback server: ${err.message}`));
       });
     });
   }
