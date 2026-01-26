@@ -852,6 +852,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .org-header {
+      position: relative;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -876,6 +877,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .org-open-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
       display: inline-flex;
       align-items: center;
       gap: 4px;
@@ -919,6 +924,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .project-header {
+      position: relative;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -992,6 +998,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
     
     .install-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
       display: inline-flex;
       align-items: center;
       gap: 4px;
