@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import { AuthProvider, Project } from '../auth/authProvider';
 import { testMcpConnection } from '../utils/mcpVerifier';
 import { getInsForgeCredentialsFromConfig, getConfigPath } from '../utils/mcpConfigReader';
+import { getPostInstallMessage } from '../utils/postInstallation';
 
 /**
  * MCP installation status
@@ -23,8 +25,8 @@ export interface McpStatusCallbacks {
  */
 function isDarkTheme(): boolean {
   const theme = vscode.window.activeColorTheme;
-  return theme.kind === vscode.ColorThemeKind.Dark || 
-         theme.kind === vscode.ColorThemeKind.HighContrast;
+  return theme.kind === vscode.ColorThemeKind.Dark ||
+    theme.kind === vscode.ColorThemeKind.HighContrast;
 }
 
 // Supported MCP clients from @insforge/install
@@ -36,7 +38,7 @@ const MCP_CLIENTS = [
   { id: 'cline', label: 'Cline', description: 'Cline VS Code Extension (VS Code globalStorage)', projectLocal: false, icon: 'cline' },
   { id: 'roocode', label: 'Roo Code', description: 'Roo-Code VS Code Extension (VS Code globalStorage)', projectLocal: false, icon: 'roo_code' },
   { id: 'copilot', label: 'GitHub Copilot', description: 'Project-local (.vscode/mcp.json)', projectLocal: true, icon: 'copilot' },
-  { id: 'codex', label: 'Codex', description: 'OpenAI Codex CLI (~/.codex/mcp_config.json)', projectLocal: false, icon: 'codex' },
+  { id: 'codex', label: 'Codex', description: 'OpenAI Codex CLI (managed via codex mcp add)', projectLocal: false, icon: 'codex' },
   { id: 'trae', label: 'Trae', description: 'Trae IDE (Trae/User/mcp.json)', projectLocal: false, icon: 'trae' },
   { id: 'qoder', label: 'Qoder', description: 'Qoder IDE (Qoder/SharedClientCache/mcp.json)', projectLocal: false, icon: 'qoder' },
   { id: 'kiro', label: 'Kiro', description: 'Kiro IDE (~/.kiro/settings/mcp.json)', projectLocal: false, icon: 'kiro' },
@@ -138,6 +140,14 @@ async function verifyFromConfig(
   maxAttempts: number = 5,
   delayMs: number = 1000
 ): Promise<{ success: boolean; tools?: string[]; error?: string }> {
+  // Codex uses its own CLI (codex mcp add) and stores config in TOML format
+  if (clientId === 'codex') {
+    return {
+      success: true,
+      tools: ['(View in Codex CLI)'],
+    };
+  }
+
   const configPath = getConfigPath(clientId, workspaceFolder);
   let lastError = '';
   let configFileFound = false;
@@ -148,17 +158,23 @@ async function verifyFromConfig(
     // Small delay to ensure file is written
     await sleep(delayMs);
 
-    // Read credentials from config file
+    // Check if config file exists first
+    const configPath = getConfigPath(clientId, workspaceFolder);
+    if (configPath && fs.existsSync(configPath)) {
+      configFileFound = true;
+    }
+
+    // Try to extract credentials
     const credentials = getInsForgeCredentialsFromConfig(clientId, workspaceFolder);
 
     if (!credentials) {
       console.log(`Attempt ${attempt}/${maxAttempts}: Config file not found or credentials missing`);
-      lastError = `Config file not found or missing InsForge credentials at: ${configPath}`;
+      lastError = configFileFound
+        ? `Config file found but InsForge credentials missing at: ${configPath}`
+        : `Config file not found at: ${configPath}`;
       continue;
     }
 
-    // If we get here, config was found and credentials extracted
-    configFileFound = true;
     credentialsFound = true;
 
     // Test connection using credentials from the config file
@@ -174,12 +190,12 @@ async function verifyFromConfig(
 
   // Provide specific error message based on what failed
   if (!configFileFound) {
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: `Config file not found at: ${configPath}. The installer may have written to a different location.`
     };
   }
-  
+
   if (!credentialsFound) {
     return {
       success: false,
@@ -187,9 +203,9 @@ async function verifyFromConfig(
     };
   }
 
-  return { 
-    success: false, 
-    error: `Config found but MCP connection failed: ${lastError}` 
+  return {
+    success: false,
+    error: `Config found but MCP connection failed: ${lastError}`
   };
 }
 
@@ -206,7 +222,7 @@ export async function installMcp(
   try {
     // Step 1: Let user pick which client to install for
     const iconSuffix = isDarkTheme() ? '' : '-light';
-    
+
     const clientPick = await vscode.window.showQuickPick(
       MCP_CLIENTS.map(client => ({
         label: client.label,
@@ -258,17 +274,6 @@ export async function installMcp(
           return false;
         }
         workspaceFolder = folderPick.folder.uri.fsPath;
-      }
-
-      // Confirm with user
-      const confirm = await vscode.window.showInformationMessage(
-        `Install InsForge MCP config to: ${workspaceFolder}?`,
-        'Yes',
-        'Cancel'
-      );
-
-      if (confirm !== 'Yes') {
-        return false;
       }
     }
 
@@ -325,7 +330,25 @@ export async function installMcp(
     // Step 7: Handle result
     if (result.success && result.tools) {
       statusCallbacks?.onVerified?.(project.id, result.tools, clientPick.id, workspaceFolder);
-      
+
+      // Show post-installation message in terminal using Pseudoterminal
+      const message = getPostInstallMessage(clientPick.label);
+      const writeEmitter = new vscode.EventEmitter<string>();
+      const pty: vscode.Pseudoterminal = {
+        onDidWrite: writeEmitter.event,
+        open: () => {
+          // Convert \n to \r\n for terminal display
+          const terminalMessage = message.replace(/\n/g, '\r\n');
+          writeEmitter.fire(terminalMessage);
+        },
+        close: () => {},
+      };
+      const terminal = vscode.window.createTerminal({
+        name: `InsForge MCP - ${clientPick.label}`,
+        pty,
+      });
+      terminal.show();
+
       vscode.window.showInformationMessage(
         `MCP installed and verified! ${result.tools.length} tools available.`,
         'View Tools'
@@ -343,7 +366,7 @@ export async function installMcp(
       statusCallbacks?.onFailed?.(project.id, result.error || 'Unknown error', clientPick.id, workspaceFolder);
 
       const configPath = getConfigPath(clientPick.id, workspaceFolder);
-      
+
       vscode.window.showErrorMessage(
         `MCP installation failed: ${result.error}`,
         'Retry',
@@ -398,10 +421,10 @@ export async function retryVerification(
   } else {
     // Show specific error about config file issue
     const configPath = getConfigPath(clientId, workspaceFolder);
-    const errorMsg = configPath 
+    const errorMsg = configPath
       ? `MCP verification failed. Could not read config from: ${configPath}`
       : `MCP verification failed: ${result.error}`;
-    
+
     statusCallbacks?.onFailed?.(projectId, result.error || 'Config file not found', clientId, workspaceFolder);
     vscode.window.showErrorMessage(errorMsg, 'Reinstall MCP').then(selection => {
       if (selection === 'Reinstall MCP') {

@@ -30,7 +30,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   ) {
     // Refresh when auth state changes
     this._disposables.push(_authProvider.onDidChangeAuth(() => this.refresh()));
-    
+
     // Refresh when theme changes (to update logo)
     this._disposables.push(vscode.window.onDidChangeActiveColorTheme(() => this.refresh()));
   }
@@ -337,28 +337,21 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async _handleRetryMcpVerification(orgId: string, projectId: string): Promise<void> {
-    const projects = await this._authProvider.getProjects(orgId);
-    const project = projects.find(p => p.id === projectId);
-    if (!project) return;
-
-    // Get API credentials
-    const apiKey = await this._authProvider.getProjectApiKey(projectId);
-    if (!apiKey) {
-      vscode.window.showErrorMessage('Could not retrieve API key for verification');
-      return;
-    }
-
-    const apiBaseUrl = `https://${project.appkey}.${project.region}.insforge.app`;
-
     // Get stored client info for retry
     const { clientId, workspaceFolder } = this.getMcpClientInfo(projectId);
+
+    // Must have clientId to know which config file to read
+    if (!clientId) {
+      vscode.window.showErrorMessage('Cannot retry: unknown client type. Please reinstall MCP.');
+      return;
+    }
 
     // Import and call retry verification
     const { retryVerification } = await import('../commands/installMcp');
     await retryVerification(
       projectId,
-      apiKey,
-      apiBaseUrl,
+      "",
+      "",
       {
         onVerifying: (pid) => this.markMcpVerifying(pid, clientId, workspaceFolder),
         onVerified: (pid, tools) => this.markMcpVerified(pid, tools, clientId, workspaceFolder),
